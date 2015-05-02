@@ -23,8 +23,18 @@ class DbHandler extends BaseController{
 	return $huserid;
 	}
     
-   
+   public function rolechange($userid, $role)
+{
+    $stmt = $this->conn->prepare("update userdetails set role=? where userid=?");
+        $stmt->bind_param("ss", $role,$userid);
+        $stmt->execute();
+      //  $tasks = $stmt->get_result();
+        $stmt->close();
+        return "1";
+}
+
 	public function gethelp($userid){
+        //echo "in get help userid is".$userid;
 	 $stmt = $this->conn->prepare("SELECT latitude,longitude  FROM location  where userid=?");
         $stmt->bind_param("s",$userid);
         $stmt->execute();
@@ -33,9 +43,7 @@ class DbHandler extends BaseController{
 		$task = $tasks->fetch_assoc();
 		$latitude=$task["latitude"];
 		$longitude=$task["longitude"];
-	//	echo "<br> latitude is". $latitude."longitude is".$longitude."<br>";
-		
-			
+		/*	
 		$stmt= $this->conn->prepare("select phoneid,userid,latitude, longitude
 FROM gcm natural join location
 WHERE (
@@ -43,12 +51,27 @@ POW( ( 69.1 * ( longitude - $longitude ) * cos( 40.711676 / 57.3 ) ) , 2 ) + POW
 ) < ( 1 *0.45 )  and userid!=? and
 lastUpdated between date_sub(now(), interval 10 minute) and now() 
 order by lastUpdated desc  ;"); 
-        $stmt->bind_param("s",$userid);
+
+
+        $stmt->bind_param('s',$userid);
         $stmt->execute();
         $tasks = $stmt->get_result();
         $stmt->close();
 		return $tasks;
-	
+        */
+
+       // echo "latitude is ".$latitude."longi is".$longitude;
+      //  $result = mysqli_query($this->conn, 
+     //"CALL nearby( $userid, '-73.9967','40.7298')" or die("Query fail: " . mysqli_error($this->conn)));
+	//$tests=$result->fetch_assoc();
+    //echo $tests["activity"];
+        $stmt = $this->conn->prepare("CALL nearby( ?, ?,?)");
+        $stmt->bind_param("sss",$userid,$longitude,$latitude);
+        $stmt->execute();
+        $tasks = $stmt->get_result();
+        $stmt->close();
+       
+        return $tasks;
 	}
 
 public function getlocation($userid){
@@ -102,7 +125,7 @@ else
         if($status=="active")
         {
             $temp=$this->verificationcode($userid);
-            if($temp["code"]=="1")
+            if($temp["code"]=="0")
             $response["code"]="1";
             else
             $response["code"]="0";
@@ -129,12 +152,13 @@ else
       //  $stmt->store_result();
         $countRows = $tasks->num_rows;
         $stmt->close();
-		
+        $algo="sha256";
+		$password = hash($algo, $password, false); 
 	 if($countRows>=1)
 	 {
         $task = $tasks->fetch_assoc();
         $status=$task["status"];
-        if(status==active)
+        if($status==active)
             $response["code"]="-2";
         else
             $response["code"]="-1";
@@ -143,9 +167,9 @@ else
      }
 	 else
 	 {
-	 
-	    $stmt = $this->conn->prepare("insert into userdetails(userid,username,password,phone) values(?,?,?,?)");
-        $stmt->bind_param("ssss", $userid,$username,$password,$phone);
+	 $role="user";
+	    $stmt = $this->conn->prepare("insert into userdetails(userid,username,password,phone,role) values(?,?,?,?,?)");
+        $stmt->bind_param("sssss", $userid,$username,$password,$phone,$role);
         $stmt->execute();
         $tasks = $stmt->get_result();
         $stmt->close();
@@ -171,9 +195,10 @@ else
 		
 }
 	
-	public function updatelocation($userid,$latitude,$longitude)
+	public function updatelocation($userid,$latitude,$longitude,$activity)
 	{
-		  $stmt = $this->conn->prepare("select * from location where userid=?");
+		 $response = array("code" => "0", "data" => "");
+        $stmt = $this->conn->prepare("select * from location where userid=?");
         $stmt->bind_param("s", $userid);
         $stmt->execute();
         $stmt->store_result();
@@ -181,16 +206,19 @@ else
 		$stmt->close();
 		
 	 if($countRows==0)
-	 {return "0";}
+	 {$response["code"]="0";
+    return $response;
+     }
 	 else
 	 {
-	 $stmt = $this->conn->prepare("update location set latitude=?,longitude=? where userid=?");
-        $stmt->bind_param("sss", $latitude,$longitude,$userid);
+	 $stmt = $this->conn->prepare("update location set latitude=?,longitude=?,activity=? where userid=?");
+        $stmt->bind_param("ssss", $latitude,$longitude,$activity,$userid);
         $stmt->execute();
         $tasks = $stmt->get_result();
         $stmt->close();
-        return "1";
-		}
+        $response["code"]="0";
+        return $response;
+	}
 	}
 
 public function updatepassword($userid,$password)
@@ -203,7 +231,8 @@ public function updatepassword($userid,$password)
        // $stmt->store_result();
         $countRows = $tasks->num_rows;
         $stmt->close();
-        
+        $algo="sha256";
+    $password = hash($algo, $password, false); 
      if($countRows==0)
      { //user does not exist
         $response["code"]="0";
@@ -211,7 +240,7 @@ public function updatepassword($userid,$password)
      }
      else
         $stmt = $this->conn->prepare("update userdetails set password=? where userid=?");
-           $stmt->bind_param("ss",$newpassword,$userid);
+           $stmt->bind_param("ss",$password,$userid);
            $stmt->execute();
            $tasks = $stmt->get_result();
            $stmt->close();
@@ -233,7 +262,9 @@ public function updatepassword($userid,$password)
         $countRows = $tasks->num_rows;
        // $tasks = $stmt->get_result();
         $stmt->close();
-        
+    $algo="sha256";
+    $oldpassword = hash($algo, $oldpassword, false);
+    $newpassword = hash($algo, $newpassword, false); 
      if($countRows==0)
      { //user does not exist
         $response["code"]="0";
@@ -291,6 +322,90 @@ public function login($userid)
 
 }	
 
+public function helperlist($victimuserid)
+{
+    // $stmt = $this->conn->prepare("SELECT userid,role, latitude, longitude  FROM 
+     //   location as l, help as h,userdetails as u
+     //   where l.userid=h.helperuserid and h.victimuserid=?
+     //   and u.userid=h.helperuserid");
+      $stmt=$this->conn->prepare(" select userid,latitude,longitude, role from userdetails natural join location
+where userid in(select helperuserid from
+ help where victimuserid=?)
+union all
+select userid,latitude, longitude,role from userdetails natural join location
+where userid in(select victimuserid from help
+where victimuserid=?)");
+        $stmt->bind_param("ss",$victimuserid,$victimuserid);
+        $stmt->execute();
+        $tasks = $stmt->get_result();
+        $stmt->close();
+        
+        return $tasks;
+
+}   
+
+
+
+public function addtohelp($helperuserid,$victimuserid)
+    {
+     $stmt = $this->conn->prepare("select * from help where helperuserid=?");
+        $stmt->bind_param("s", $helperuserid);
+        $stmt->execute();
+        $tasks = $stmt->get_result();
+        $stmt->store_result();
+        $countRows = $tasks->num_rows;
+       // $tasks = $stmt->get_result();
+        $stmt->close();
+        
+     if($countRows==0)
+     { 
+     $stmt = $this->conn->prepare("insert into help(helperuserid,victimuserid) values(?,?)");
+        $stmt->bind_param("ss",$helperuserid,$victimuserid);
+        $stmt->execute();
+       // $tasks = $stmt->get_result();
+        $stmt->close();
+        return "1"; 
+     }
+     else
+    {
+       
+           $stmt = $this->conn->prepare("update help set victimuserid=? where helperuserid=?");
+           $stmt->bind_param("ss",$victimuserid,$helperuserid);
+           $stmt->execute();
+          // $tasks = $stmt->get_result();
+           $stmt->close();
+          // $response["code"]="1";
+           
+            return "1";
+           
+    }
+    }
+
+public function helped($helperuserid)
+{
+     $stmt = $this->conn->prepare("delete  FROM help  where helperuserid=?");
+        $stmt->bind_param("s",$helperuserid);
+        $stmt->execute();
+       // $tasks = $stmt->get_result();
+        $stmt->close();
+      //  $task = $tasks->fetch_assoc();
+        return "1";
+
+}   
+
+
+public function helpreceived($victimuserid)
+{
+     $stmt = $this->conn->prepare("delete  FROM help  where victimuserid=?");
+        $stmt->bind_param("s",$victimuserid);
+        $stmt->execute();
+       // $tasks = $stmt->get_result();
+        $stmt->close();
+      //  $task = $tasks->fetch_assoc();
+        return "1";
+
+}  
+
 
 	public function updatestatus($userid)
 	{
@@ -306,7 +421,7 @@ public function login($userid)
 public function updategcm($userid,$gcm)
 	{
 	//echo "in gcm db";
-	
+	$response= array();
 		  $stmt = $this->conn->prepare("select * from gcm where userid=?");
         $stmt->bind_param("s", $userid);
         $stmt->execute();
@@ -315,7 +430,15 @@ public function updategcm($userid,$gcm)
 		$stmt->close();
 		
 	 if($countRows>=1)
-	 {return "0";}
+	 {
+        $stmt = $this->conn->prepare("update gcm set phoneid=? where userid=?");
+        $stmt->bind_param("ss", $gcm,$userid);
+        $stmt->execute();
+        $tasks = $stmt->get_result();
+        $stmt->close();
+       $response["code"]="2";
+       return $response;
+    }
 	 else
 	 {
 	 $stmt = $this->conn->prepare("insert into gcm(userid,phoneid) values(?,?)");
@@ -323,10 +446,18 @@ public function updategcm($userid,$gcm)
         $stmt->execute();
         $tasks = $stmt->get_result();
         $stmt->close();
-        return "1";
-		}
+        $response["code"]="1";
+        return $response;
+        
+	}
+
+    $response["code"]="0";
+    return $response;
 		
 	}
+
+
+
  public function verificationcode($userid)
  {
  $response = array("code" => "0", "data" => "");
@@ -340,7 +471,7 @@ public function updategcm($userid,$gcm)
         
 if($countRows==0)
      {
-//new user
+//new user in verify
        $response["code"]="1";
  $key= rand(1000,9999);
  //echo "key is".$key;
@@ -409,6 +540,7 @@ mail($to, $subject, $message, $headers);
 
 function sendGoogleCloudMessage( $dataa, $ids )
 {
+    $response=array();
 $data= array( "message" => $dataa );
 
    // print_r($data);
@@ -480,8 +612,9 @@ curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
 
     if ( curl_errno( $ch ) )
     {
-        echo 'GCM error: ' . curl_error( $ch );
-		return "0";
+       // echo 'GCM error: ' . curl_error( $ch );
+        $response["code"]="0";
+		return $response;
     }
 
     //------------------------------
@@ -493,8 +626,8 @@ curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
     //------------------------------
     // Debug GCM response
     //------------------------------
-
-return "1";
+$response["code"]="1";
+return $response;
 
    // echo $result;
 }
@@ -503,7 +636,7 @@ return "1";
 
 function gcmhelpreceived( $dataa, $ids )
 {
-    echo "in helpreceived gcm";
+   // echo "in helpreceived gcm";
 $data= array( "message" => $dataa );
 
    // print_r($data);
